@@ -1,0 +1,202 @@
+---
+title: "Project 4"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+runtime: shiny
+---
+
+```{r setup global, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(lubridate)
+library(wordcloud)
+library(lme4)
+
+data_url = "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-04-28/grosses.csv"
+filepath ="data/grosses.csv"
+
+if (!dir.exists("../data")) dir.create("data")
+if (!file.exists(filepath)) {
+    data = read.csv(data_url)
+    write.csv(data, file = filepath)
+}
+
+data_raw = read.csv(filepath)
+```
+
+# About
+
+## Column
+
+As a fanatic music theater fan myself, I've paid hundreds of visits to various theaters, among which the most famous ones are on the prestigious Broadway in New York City. I have always been curious about how the show industry works, and what it is like to run a theater.
+
+This dashboard uses a dataset called [`grosses`](https://github.com/rfordatascience/tidytuesday/tree/master/data/2020/2020-04-28) from Tidytuesday. This dataset contains 58 Broadway theaters and thousands of shows that have been on stage from 1985 to 2020. It also provides information on ticket prices, weekly gross incomes, seat capacities, and number of seats sold. I would like to use this dashboard and the data to provide whoever is a theatergoer like me with an opportunity to explore a bit more about these theaters and shows: What are the most popular shows? How has the income changed since 1985? Is ticket price an influential factor when it comes to selling seats?
+
+Hope you enjoy the show!
+
+## Column
+
+![Source: "Les Miserables": A Great Theatrical Dream, The Theatre Times](https://thetheatretimes.com/wp-content/uploads/2018/06/IMG_0439-1024x683.jpg){width=90%}
+
+# One peek at the data {data-navmenu="The Data"}
+
+This data comes from [Tidytuesday 2020-04-28](https://github.com/rfordatascience/tidytuesday/tree/master/data/2020/2020-04-28) (originally [Playbill](https://www.playbill.com/grosses)), and the data dictionary is included. There are a few data files available, but we only uses the `grosses.csv`, which contains the theater-wise weekly gross income and seat information. Simple data processing has been implemented to select desired variables and keep the data set clean.
+
+```{r}
+data = data_raw %>% 
+    mutate(week_ending = ymd(week_ending)) %>%
+    select(week_ending, week_number, weekly_gross, show, theatre, avg_ticket_price, pct_capacity, seats_in_theatre) %>%
+    mutate(oversold = pct_capacity > 1)
+
+data %>%
+  DT::datatable()
+```
+
+# Who's the most popular {data-navmenu="The Data"}
+
+Column
+-------------------------------------
+
+### 
+In this page, I created two word clouds demonstrating the most popular shows and theaters by their respective frequencies. It looks like the most popular shows are "Les Miserables", "The Lion King", "Chicago", "Cat" and "Wicked", while the Nederlander Theater, the Booth Theater, the Broadway Theater and the Palace Theater are among the most visited theaters.
+
+Column {.tabset}
+-------------------------------------
+
+### Shows
+
+```{r}
+show_freq = sort(table(data$show), decreasing = TRUE)[1:50]
+
+set.seed(1630)
+wordcloud(names(show_freq),
+          show_freq/sum(show_freq),
+          col=terrain.colors(length(show_freq), alpha=0.9),
+          rot.per=0.3)
+```
+
+### Theatres
+
+```{r}
+theatre_freq = sort(table(data$theatre), decreasing = TRUE)
+
+set.seed(723)
+wordcloud(names(theatre_freq),
+          theatre_freq/sum(theatre_freq),
+          col = terrain.colors(length(theatre_freq), alpha=0.9),
+          rot.per=0.3)
+```
+
+# Best time of the year {data-navmenu="The Data"}
+
+## Column
+
+### 
+
+Here is a plot of the percentage of seats sold against week number. It shows during one year, when people go to the theater the most frequently. Only ten theaters are shown due to space limit.
+
+## Column
+
+###
+
+```{r}
+theaters_seats = data %>%
+    group_by(theatre) %>%
+    summarise(seats = max(seats_in_theatre), date = max(week_ending)) %>%
+    arrange(desc(date), desc(seats))
+
+data %>%
+    group_by(theatre, week_number) %>%
+    summarise(avg_pct_capacity = mean(pct_capacity)) %>%
+    filter(theatre %in% theaters_seats$theatre[1:10]) %>%
+    ggplot(aes(x = week_number, y = avg_pct_capacity)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(.~theatre) +
+    labs(x = "Week Number", y = "Seats Sold Percent", title = "Average Weekly Seats Sold Percent in One Year",
+         subtitle = "Averaged over years; stratified by theaters", caption = "Source: TidyTuesday, 2020.4.28")
+```
+
+# How's it going since 1985 {data-navmenu="The Data"}
+
+## Column (.sidebar)
+
+### 
+
+In this page you can explore the trend of weekly gross income for each theater over the years. You may choose the theater and time range below.
+
+```{r}
+sliderInput("year", "Year:", min = 1985, max = 2020, value = c(1985, 2020))
+selectInput("theater", "Theater:", sort(unique(data$theatre)))
+```
+
+## Column
+
+### Weekly Gross Income Trend
+
+```{r}
+renderPlot({
+    data %>%
+        filter(year(week_ending) >= as.numeric(input$year[1]) & year(week_ending) <= as.numeric(input$year[2])) %>%
+        filter(theatre == input$theater) %>%
+        ggplot(aes(x = week_ending, y = weekly_gross)) +
+        geom_point() +
+        geom_smooth() +
+        labs(x = "Time", y = "Weekly Gross Income", title = input$theater)
+})
+```
+
+# Full house {data-navmenu="The Data"}
+
+## Column (.sidebar)
+
+### 
+
+When standing tickets are sold (percentage of seats sold greater than 1), it implies an exceptionally successful week of shows. In this page you can explore how the average price is associated with the average ticket price. You may choose the theater below.
+
+```{r}
+selectInput("theater2", "Theater:", sort(unique(data$theatre)))
+```
+
+## Column
+
+### Seats Over Sold and Ticket Price
+
+```{r}
+renderPlot({
+    data %>%
+        filter(theatre == input$theater2) %>%
+        ggplot(aes(x = factor(oversold), y = avg_ticket_price)) +
+        geom_boxplot() +
+        labs(x = "Oversold", y = "Average Ticket Price", title = input$theater2)
+})
+```
+
+# Analysis
+
+In this page, inferential analysis is conducted. We explore the relationship between the weekly gross income and time, average ticket price, and percentage of seats sold. Linear mixed effects model is employed to account for differences in theaters. We can see that all three variables are significant. With time, ticket price and sold seats percentage increase, weekly gross income increases as well.
+
+On the right is the qq-plot for the random effects, which roughly follows a normal distribution.
+
+## Column
+
+```{r}
+fit.mix = lmer(weekly_gross/1000~week_ending + avg_ticket_price + pct_capacity + (1|theatre), data = data)
+summary(fit.mix)
+```
+
+## Column
+
+```{r}
+plot(ranef(fit.mix))
+```
+
+# Video Demo
+
+<iframe
+    width="640"
+    height="480"
+    src="https://www.youtube.com/embed/vs5QJg6SoI4"
+    frameborder="0"
+    allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share;" allowfullscreen></iframe>
